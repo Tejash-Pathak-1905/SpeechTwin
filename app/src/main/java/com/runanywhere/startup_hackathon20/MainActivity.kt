@@ -370,25 +370,43 @@ fun SpeechTwinScreen(
                             scope.launch {
                                 isAnalyzing = true
                                 showAnalysisDialog = true
-
                                 try {
-                                    val result = withContext(Dispatchers.IO) {
+                                    // --- CHANGED: Use new analyzeComplete method ---
+                                    val completeFeatures = withContext(Dispatchers.IO) {
                                         val analyzer = VoiceAnalyzer()
-                                        analyzer.analyze(audioFile.absolutePath)
+                                        analyzer.analyzeComplete(audioFile.absolutePath)
                                     }
 
-                                    analysisResult = result
-                                    isAnalyzing = false
+                                    // --- NEW: Save to repository ---
+                                    val repository = VoiceFeatureRepository(context)
+                                    val saved = repository.saveFeatures(completeFeatures)
 
+                                    if (saved) {
+                                        Log.d("MainActivity", "Success! Saved 22 features for: ${completeFeatures.recordingId}")
+                                    } else {
+                                        Log.e("MainActivity", "Failed to save features")
+                                    }
+
+                                    // --- Maintain backward compatibility for UI ---
+                                    analysisResult = VoiceAnalyzer.AnalysisResult(
+                                        pitch = completeFeatures.pitch,
+                                        loudness = completeFeatures.loudness,
+                                        jitter = completeFeatures.jitter,
+                                        shimmer = completeFeatures.shimmer,
+                                        healthScore = completeFeatures.healthScore,
+                                        duration = completeFeatures.duration.toInt()
+                                    )
+
+                                    isAnalyzing = false
                                     Toast.makeText(
                                         context,
-                                        "Analysis complete! Pitch: ${result.pitch.toInt()} Hz, Health: ${result.healthScore}%",
+                                        "Analysis complete! Health Score: ${completeFeatures.healthScore}",
                                         Toast.LENGTH_LONG
                                     ).show()
 
-                                    if (result.healthScore < 70) {
+                                    // Continue with healthy voice processing if score is low
+                                    if (completeFeatures.healthScore < 70) {
                                         isProcessingHealthyVoice = true
-
                                         try {
                                             val healthyFile = File(
                                                 context.cacheDir,
@@ -398,29 +416,22 @@ fun SpeechTwinScreen(
                                                 AudioProcessor.processToHealthyVoice(
                                                     audioFile,
                                                     healthyFile,
-                                                    result.jitter,
-                                                    result.shimmer
+                                                    completeFeatures.jitter,
+                                                    completeFeatures.shimmer
                                                 )
                                             }
                                             if (processing.success) {
                                                 healthyVoiceFile = healthyFile
                                                 processingResult = processing
-                                                Log.d(
-                                                    "SpeechTwinScreen",
-                                                    "Healthy voice generated successfully!"
-                                                )
                                             }
                                         } catch (e: Exception) {
-                                            Log.e(
-                                                "SpeechTwinScreen",
-                                                "Error generating healthy voice: ${e.message}"
-                                            )
+                                            Log.e("MainActivity", "Error generating healthy voice: ${e.message}")
                                         } finally {
                                             isProcessingHealthyVoice = false
                                         }
                                     }
                                 } catch (e: Exception) {
-                                    Log.e("SpeechTwinScreen", "Error analyzing audio: ${e.message}")
+                                    Log.e("MainActivity", "Error analyzing audio: ${e.message}", e)
                                     isAnalyzing = false
                                     Toast.makeText(
                                         context,
@@ -429,6 +440,7 @@ fun SpeechTwinScreen(
                                     ).show()
                                 }
                             }
+
                         } else {
                             Toast.makeText(context, "Failed to save recording", Toast.LENGTH_SHORT)
                                 .show()
